@@ -10,6 +10,9 @@ const GRASS := Color(0.47, 0.74, 0.33)
 const GRASS_DARK := Color(0.37, 0.63, 0.27)
 const PANEL_BG := Color(0.09, 0.11, 0.14, 0.86)
 
+## 草坪从屏幕的这个高度开始（鸡窝全部平铺在草坪上）。
+const HORIZON_RATIO := 0.24
+
 var ui_font: SystemFont
 
 # —— 界面层 ——
@@ -33,6 +36,8 @@ var intro_overlay: Control
 var result_overlay: Control
 var result_text: Label
 var start_button: Button
+var count_spin: SpinBox
+var chosen_count: int = 20
 
 # —— 运行时数据 ——
 var slots: Array = []
@@ -87,30 +92,66 @@ func _build_background() -> void:
 
 func _draw_background() -> void:
 	var s := bg_layer.size
-	# 天空渐变
-	var bands := 32
+	if s.x <= 0.0 or s.y <= 0.0:
+		return
+	var horizon := clampf(s.y * HORIZON_RATIO, 120.0, s.y * 0.45)
+
+	# 天空渐变（只铺到地平线，下面是整片草坪）
+	var bands := 24
 	for i in bands:
 		var t := float(i) / float(bands - 1)
-		bg_layer.draw_rect(Rect2(0, s.y * i / bands, s.x, s.y / bands + 1.0), SKY_TOP.lerp(SKY_BOTTOM, t))
+		bg_layer.draw_rect(
+			Rect2(0, horizon * i / bands, s.x, horizon / bands + 1.0),
+			SKY_TOP.lerp(SKY_BOTTOM, t))
+
 	# 太阳
-	bg_layer.draw_circle(Vector2(s.x * 0.90, s.y * 0.16), 96.0, Color(1.0, 0.93, 0.55, 0.95))
-	bg_layer.draw_circle(Vector2(s.x * 0.90, s.y * 0.16), 72.0, Color(1.0, 0.97, 0.72, 0.95))
+	var sun_r := minf(72.0, horizon * 0.32)
+	var sun_c := Vector2(s.x * 0.90, horizon * 0.36)
+	bg_layer.draw_circle(sun_c, sun_r, Color(1.0, 0.93, 0.55, 0.95))
+	bg_layer.draw_circle(sun_c, sun_r * 0.74, Color(1.0, 0.97, 0.72, 0.95))
+
 	# 云
-	_draw_cloud(bg_layer, Vector2(s.x * 0.18, s.y * 0.14), 1.0)
-	_draw_cloud(bg_layer, Vector2(s.x * 0.55, s.y * 0.09), 0.75)
-	_draw_cloud(bg_layer, Vector2(s.x * 0.78, s.y * 0.24), 0.6)
-	# 草地
-	var horizon := s.y * 0.62
-	if horizon < 80:
-		horizon = 80
-	bg_layer.draw_rect(Rect2(0, horizon, s.x, s.y - horizon), GRASS)
-	bg_layer.draw_rect(Rect2(0, horizon, s.x, 10.0), GRASS_DARK)
-	# 栅栏装饰
+	_draw_cloud(bg_layer, Vector2(s.x * 0.18, horizon * 0.30), 0.9)
+	_draw_cloud(bg_layer, Vector2(s.x * 0.55, horizon * 0.18), 0.65)
+	_draw_cloud(bg_layer, Vector2(s.x * 0.74, horizon * 0.52), 0.5)
+
+	# 栅栏（位于天空与草坪交界处，底部会被草坪盖住）
 	var fence_x := 40.0
-	while fence_x < s.x - 40:
-		bg_layer.draw_rect(Rect2(fence_x, horizon - 40, 14, 46), Color(0.85, 0.75, 0.55))
+	while fence_x < s.x - 40.0:
+		bg_layer.draw_rect(Rect2(fence_x, horizon - 48.0, 14.0, 56.0), Color(0.85, 0.75, 0.55))
 		fence_x += 64.0
-	bg_layer.draw_rect(Rect2(0, horizon - 26, s.x, 8), Color(0.80, 0.70, 0.50))
+	bg_layer.draw_rect(Rect2(0, horizon - 30.0, s.x, 8.0), Color(0.80, 0.70, 0.50))
+
+	# 草坪
+	bg_layer.draw_rect(Rect2(0, horizon, s.x, s.y - horizon), GRASS)
+	bg_layer.draw_rect(Rect2(0, horizon, s.x, 8.0), GRASS_DARK)
+
+	# 草坪光影条带（横向明暗，增加平铺的纵深感）
+	var stripe_h := maxf(56.0, s.y * 0.06)
+	var stripe := 0
+	var y := horizon + 8.0
+	while y < s.y:
+		if stripe % 2 == 1:
+			bg_layer.draw_rect(
+				Rect2(0, y, s.x, minf(stripe_h, s.y - y)),
+				Color(1.0, 1.0, 1.0, 0.035))
+		y += stripe_h
+		stripe += 1
+
+	# 草丛笔触
+	var tuft := GRASS_DARK
+	tuft.a = 0.42
+	var row := 0
+	var gy := horizon + 26.0
+	while gy < s.y:
+		var gx := 18.0 + _hash01(row * 37 + 5) * 70.0
+		while gx < s.x:
+			var h := 7.0 + 9.0 * _hash01(row * 53 + int(gx))
+			bg_layer.draw_line(Vector2(gx, gy), Vector2(gx - 3.5, gy - h), tuft, 2.0, true)
+			bg_layer.draw_line(Vector2(gx + 4.0, gy), Vector2(gx + 6.5, gy - h * 0.75), tuft, 2.0, true)
+			gx += 118.0
+		gy += 92.0
+		row += 1
 
 
 func _draw_cloud(c: CanvasItem, center: Vector2, scale_factor: float) -> void:
@@ -129,8 +170,14 @@ func _draw_cloud(c: CanvasItem, center: Vector2, scale_factor: float) -> void:
 func _build_farm() -> void:
 	farm_view = Control.new()
 	farm_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_anchor_full(farm_view)
-	farm_view.offset_top = 84.0
+	# 只占用草坪区域，鸡窝直接平铺在草地上
+	farm_view.anchor_left = 0.0
+	farm_view.anchor_top = HORIZON_RATIO
+	farm_view.anchor_right = 1.0
+	farm_view.anchor_bottom = 1.0
+	farm_view.offset_left = 0.0
+	farm_view.offset_top = 18.0
+	farm_view.offset_right = 0.0
 	farm_view.offset_bottom = -140.0
 	add_child(farm_view)
 	farm_view.resized.connect(_fit_grid)
@@ -145,6 +192,10 @@ func _build_farm() -> void:
 func _fit_grid() -> void:
 	if grid == null or slots.is_empty():
 		return
+	# 窗口比例变化时重新挑选列数，保证鸡窝始终完整地铺在草坪上
+	var best_cols := _columns_for(slots.size())
+	if best_cols != grid.columns:
+		grid.columns = best_cols
 	var cols: int = max(1, grid.columns)
 	var n := slots.size()
 	var rows := int(ceil(float(n) / float(cols)))
@@ -162,8 +213,26 @@ func _fit_grid() -> void:
 
 
 func _columns_for(n: int) -> int:
-	var c := int(ceil(sqrt(float(n) * 1.7)))
-	return clampi(c, 3, 5)
+	# 按当前可用区域挑选“缩放后最大”的列数，保证鸡窝尽量大且不溢出
+	if n <= 1:
+		return 1
+	var avail := farm_view.size if farm_view != null else Vector2.ZERO
+	if avail.x <= 1.0 or avail.y <= 1.0:
+		avail = size
+	if avail.x <= 1.0 or avail.y <= 1.0:
+		avail = Vector2(1920, 700)
+	var cell := NestSlot.SLOT_SIZE
+	var best_cols := 1
+	var best_scale := -1.0
+	for cols in range(1, n + 1):
+		var rows := int(ceil(float(n) / float(cols)))
+		var total_w := cols * cell.x + (cols - 1) * SEPARATION
+		var total_h := rows * cell.y + (rows - 1) * SEPARATION
+		var sc := minf(avail.x / total_w, avail.y / total_h)
+		if sc > best_scale + 0.001:
+			best_scale = sc
+			best_cols = cols
+	return best_cols
 
 
 # ——————————————————————————————————————————————
@@ -192,30 +261,50 @@ func _build_topbar() -> void:
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui_layer.add_child(bar)
 
-	var hb := HBoxContainer.new()
-	hb.add_theme_constant_override("separation", 22)
-	_anchor_full(hb)
-	hb.offset_left = 20.0
-	hb.offset_right = -20.0
-	hb.offset_top = 12.0
-	hb.offset_bottom = -12.0
-	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui_layer.add_child(hb)
-
-	mode_label = _make_label("超级农场", 22, Color(1, 1, 1, 0.9))
-	hb.add_child(mode_label)
-	hb.add_child(_make_spacer())
-
+	# 中间的标题横跨整条顶栏并居中，不再受两侧信息宽度影响
 	var title := _make_label("超级农场 · 孵蛋大作战", 30, Color(1.0, 0.94, 0.6))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hb.add_child(title)
-	hb.add_child(_make_spacer())
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.anchor_right = 1.0
+	title.offset_bottom = 72.0
+	ui_layer.add_child(title)
+
+	# 左侧：当前模式 + 已进行时间
+	var left_group := HBoxContainer.new()
+	left_group.add_theme_constant_override("separation", 18)
+	left_group.anchor_bottom = 0.0
+	left_group.offset_left = 20.0
+	left_group.offset_top = 10.0
+	left_group.offset_right = 760.0
+	left_group.offset_bottom = 62.0
+	left_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(left_group)
+
+	var cfg := GameConfig.new()
+	cfg.mode = chosen_mode
+	mode_label = _make_label(cfg.mode_label(), 20, Color(1, 1, 1, 0.9))
+	mode_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	left_group.add_child(mode_label)
 
 	time_label = _make_label("时间 00:00", 22, Color(1, 1, 1, 0.9))
-	hb.add_child(time_label)
-	hb.add_child(_make_spacer())
+	time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	left_group.add_child(time_label)
+
+	# 右侧：通关人数
+	var right_group := HBoxContainer.new()
+	right_group.alignment = BoxContainer.ALIGNMENT_END
+	right_group.anchor_left = 1.0
+	right_group.anchor_right = 1.0
+	right_group.offset_left = -320.0
+	right_group.offset_top = 10.0
+	right_group.offset_right = -20.0
+	right_group.offset_bottom = 62.0
+	right_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(right_group)
+
 	clear_label = _make_label("通关 0 / 0", 22, Color(0.7, 1.0, 0.7))
-	hb.add_child(clear_label)
+	clear_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	right_group.add_child(clear_label)
 
 
 # ——————————————————————————————————————————————
@@ -331,13 +420,15 @@ func _build_intro() -> void:
 	count_row.add_theme_constant_override("separation", 12)
 	v.add_child(count_row)
 	count_row.add_child(_make_label("参与人数：", 24, Color(1, 1, 1, 0.9)))
-	var spin := SpinBox.new()
-	spin.min_value = 5
-	spin.max_value = 30
-	spin.value = 20
-	spin.add_theme_font_override("font", ui_font)
-	spin.custom_minimum_size = Vector2(140, 0)
-	count_row.add_child(spin)
+	count_spin = SpinBox.new()
+	count_spin.min_value = 5
+	count_spin.max_value = 30
+	count_spin.value = chosen_count
+	count_spin.add_theme_font_override("font", ui_font)
+	count_spin.custom_minimum_size = Vector2(140, 0)
+	count_spin.value_changed.connect(func(v: float) -> void:
+		chosen_count = clampi(int(v), 5, 30))
+	count_row.add_child(count_spin)
 
 	v.add_child(_make_spacer(10.0))
 
@@ -349,7 +440,7 @@ func _build_intro() -> void:
 	start_button.custom_minimum_size = Vector2(320, 64)
 	start_button.pressed.connect(func() -> void:
 		Sfx.play("click")
-		_start_game(chosen_mode, int(spin.value)))
+		_start_game(chosen_mode, _chosen_player_count()))
 	var center := HBoxContainer.new()
 	center.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(start_button)
@@ -380,6 +471,10 @@ func _mode_group() -> ButtonGroup:
 
 func _choose_mode(mode: int) -> void:
 	chosen_mode = mode
+	if mode_label != null:
+		var cfg := GameConfig.new()
+		cfg.mode = mode
+		mode_label.text = cfg.mode_label()
 
 
 # ——————————————————————————————————————————————
@@ -446,6 +541,7 @@ func _build_result() -> void:
 func _connect_signals() -> void:
 	GameManager.egg_hatched.connect(_on_egg_hatched)
 	GameManager.egg_stolen.connect(_on_egg_stolen)
+	GameManager.hen_left_nest.connect(_on_hen_left)
 	GameManager.reward_fed.connect(_on_reward_fed)
 	GameManager.shield_blocked.connect(_on_shield_blocked)
 	GameManager.nest_destroyed.connect(_on_nest_destroyed)
@@ -462,16 +558,28 @@ func _start_game(mode: int, count: int) -> void:
 	intro_overlay.visible = false
 	result_overlay.visible = false
 	selected_id = -1
+	count = clampi(count, 5, 30)
+	chosen_count = count
 	GameManager.start_game(mode, count)
 	_build_nests()
+
+
+func _chosen_player_count() -> int:
+	# 用户手动输入人数后直接点击按钮时，SpinBox 可能还没提交文本，这里直接读取输入框
+	if count_spin != null:
+		var typed := count_spin.get_line_edit().text.strip_edges()
+		if typed.is_valid_int():
+			chosen_count = clampi(int(typed), 5, 30)
+		else:
+			chosen_count = clampi(int(count_spin.value), 5, 30)
+		count_spin.value = chosen_count
+	return chosen_count
 
 
 func _reset_to_intro() -> void:
 	result_overlay.visible = false
 	GameManager.reset_to_intro()
-	for slot in slots:
-		slot.queue_free()
-	slots.clear()
+	_clear_slots()
 	intro_overlay.visible = true
 	selected_id = -1
 	_update_teacher_label()
@@ -479,16 +587,26 @@ func _reset_to_intro() -> void:
 
 func _toggle_game() -> void:
 	if GameManager.is_intro():
-		_start_game(chosen_mode, 20)
+		_start_game(chosen_mode, _chosen_player_count())
 	elif GameManager.is_playing():
 		GameManager.end_game()
 
 
-func _build_nests() -> void:
+func _clear_slots() -> void:
+	# 立即从场景树移除，避免重建时同一帧里新旧鸡窝同时显示导致数量翻倍
 	for slot in slots:
-		slot.queue_free()
+		if is_instance_valid(slot):
+			if slot.get_parent() != null:
+				slot.get_parent().remove_child(slot)
+			slot.queue_free()
 	slots.clear()
+
+
+func _build_nests() -> void:
+	_clear_slots()
 	var n: int = GameManager.players.size()
+	if n <= 0:
+		return
 	grid.columns = _columns_for(n)
 	for p in GameManager.players:
 		var slot := NestSlot.new()
@@ -563,12 +681,13 @@ func _unhandled_input(event: InputEvent) -> void:
 # ——————————————————————————————————————————————
 
 func _process(_delta: float) -> void:
-	if GameManager.is_playing():
-		mode_label.text = GameManager.config.mode_label()
-		time_label.text = "时间 %s" % _fmt_time(GameManager.elapsed_time)
-		clear_label.text = "通关 %d / %d" % [GameManager.completed_count(), GameManager.players.size()]
-		for slot in slots:
-			slot.queue_redraw()
+	time_label.text = "时间 %s" % _fmt_time(GameManager.elapsed_time)
+	if not GameManager.is_playing():
+		return
+	mode_label.text = GameManager.config.mode_label()
+	clear_label.text = "通关 %d / %d" % [GameManager.completed_count(), GameManager.players.size()]
+	for slot in slots:
+		slot.queue_redraw()
 
 
 func _on_resized() -> void:
@@ -578,8 +697,12 @@ func _on_resized() -> void:
 
 
 func _fmt_time(t: float) -> String:
-	var total := int(t)
-	return "%02d:%02d" % [total / 60, total % 60]
+	var total := maxi(0, int(t))
+	var minutes := floori(total / 60.0)
+	var seconds := total % 60
+	if minutes >= 60:
+		return "%d:%02d:%02d" % [floori(minutes / 60.0), minutes % 60, seconds]
+	return "%02d:%02d" % [minutes, seconds]
 
 
 # ——————————————————————————————————————————————
@@ -606,6 +729,13 @@ func _on_egg_stolen(id: int, amount: int, noise_level: bool) -> void:
 	if slot != null:
 		_spawn_float(slot, "-%d 蛋" % amount, Color(1.0, 0.35, 0.35))
 		_spawn_mouse(slot, noise_level)
+
+
+## 离座：母鸡先走出画面，等老鼠偷完蛋再走回来。
+func _on_hen_left(id: int) -> void:
+	var slot := _slot_for(id)
+	if slot != null:
+		slot.hen_leave(MouseFX.TOTAL_DURATION + 0.25)
 
 
 func _on_reward_fed(id: int, buff: bool, shield: bool) -> void:
@@ -662,11 +792,12 @@ func _spawn_float(slot: NestSlot, text: String, color: Color) -> void:
 
 func _spawn_mouse(slot: NestSlot, big: bool) -> void:
 	var rect := slot.get_global_rect()
-	var center := rect.get_center()
-	var from_left := center.x < size.x * 0.5
+	# 对准鸡窝（鸡窝在格子 70% 高度处），而不是格子中心
+	var target := rect.position + Vector2(rect.size.x * 0.5, rect.size.y * 0.78)
+	var from_left := target.x < get_viewport_rect().size.x * 0.5
 	var mouse := MouseFX.new()
 	fx_layer.add_child(mouse)
-	mouse.setup(from_left, center, big)
+	mouse.setup(from_left, target, big, rect.size.x * 0.42)
 
 
 # ——————————————————————————————————————————————
@@ -735,3 +866,9 @@ func _ellipse(c: CanvasItem, center: Vector2, rx: float, ry: float, color: Color
 		var a := TAU * float(i) / float(points)
 		pts.append(center + Vector2(cos(a) * rx, sin(a) * ry))
 	c.draw_colored_polygon(pts, color)
+
+
+## 稳定的伪随机数（用于草丛 / 稻草纹理，避免每帧跳动）。
+func _hash01(v: int) -> float:
+	var x := sin(float(v) * 12.9898) * 43758.5453
+	return x - floor(x)

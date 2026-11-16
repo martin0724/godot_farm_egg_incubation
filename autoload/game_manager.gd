@@ -104,13 +104,15 @@ func trigger_leave(player_id: int) -> void:
 	player_updated.emit(p)
 
 
-## 吵闹惩罚：老鼠大偷袭，一次性偷 2 蛋。
+## 吵闹惩罚：老鼠大偷袭，一次性偷 2 蛋（母鸡同样会被惊出画面）。
 func trigger_noise(player_id: int) -> void:
 	var p := get_player(player_id)
 	if not _can_be_punished(p):
 		return
 	mouse_appeared.emit(p.id)
+	hen_left_nest.emit(p.id)
 	_steal(p, GameConfig.EGG_STEAL_ON_NOISE, true)
+	hen_returned.emit(p.id)
 	player_updated.emit(p)
 
 
